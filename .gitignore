@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+.idea/
+.vscode/
+.DS_Store
+.coverage
+htmlcov/
+build/
+dist/
+*.spec
+*.log
+credentials/client_secrets.json
+credentials/token.json
+bin/*.exe
