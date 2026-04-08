@@ -15,3 +15,10 @@ dist/
 credentials/client_secrets.json
 credentials/token.json
 bin/*.exe
+
+# Python packaging artifacts
+*.egg-info/
+
+# Claude Code / OMC local state
+.claude/
+.omc/
