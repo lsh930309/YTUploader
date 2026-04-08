@@ -89,6 +89,23 @@ def get_tool_runtime_path(name: str) -> Path:
     return get_tool_runtime_dir() / executable_name
 
 
+def get_ffmpeg_runtime_dir() -> Path:
+    return get_tool_runtime_dir() / "ffmpeg"
+
+
+def get_ffmpeg_runtime_binary_path(name: str) -> Path:
+    executable_name = name if name.lower().endswith(".exe") else f"{name}.exe"
+    return get_ffmpeg_runtime_dir() / "bin" / executable_name
+
+
+def get_mkvtoolnix_runtime_dir() -> Path:
+    return get_tool_runtime_dir() / "mkvtoolnix"
+
+
+def get_mkvmerge_runtime_path() -> Path:
+    return get_mkvtoolnix_runtime_dir() / "mkvmerge.exe"
+
+
 def get_mpc_be_runtime_executable_path() -> Path:
     return get_mpc_be_runtime_dir() / MPC_BE_RUNTIME_EXE
 
@@ -102,12 +119,19 @@ def get_icon_path() -> Path:
 
 
 def binary_path(name: str) -> Path:
-    executable_name = name if name.lower().endswith(".exe") else f"{name}.exe"
+    normalized_name = name[:-4] if name.lower().endswith(".exe") else name
+    executable_name = f"{normalized_name}.exe"
     candidates = [
         get_tool_runtime_path(executable_name),
         resource_path("bin", executable_name),
         get_project_root() / "bin" / executable_name,
     ]
+
+    if normalized_name in {"ffmpeg", "ffprobe", "ffplay"}:
+        candidates.insert(0, get_ffmpeg_runtime_binary_path(normalized_name))
+    elif normalized_name == "mkvmerge":
+        candidates.insert(0, get_mkvmerge_runtime_path())
+
     for candidate in candidates:
         if candidate.exists():
             return candidate
@@ -128,6 +152,8 @@ def ensure_runtime_dirs() -> dict[str, Path]:
         "temp": get_temp_root(),
         "logs": get_logs_dir(),
         "tools": get_tool_runtime_dir(),
+        "ffmpeg_runtime": get_ffmpeg_runtime_dir(),
+        "mkvtoolnix_runtime": get_mkvtoolnix_runtime_dir(),
         "mpc_be": get_mpc_be_dir(),
         "mpc_be_runtime": get_mpc_be_runtime_dir(),
     }

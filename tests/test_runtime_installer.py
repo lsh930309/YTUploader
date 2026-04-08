@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.mpc_be import MPCBEController
-from core.runtime_installer import AppRuntimeInstaller
+from core.runtime_installer import AppRuntimeInstaller, RuntimeInstallError
 
 
 def test_install_ffmpeg_copies_ffmpeg_and_ffprobe(monkeypatch, tmp_path: Path) -> None:
@@ -16,6 +16,11 @@ def test_install_ffmpeg_copies_ffmpeg_and_ffprobe(monkeypatch, tmp_path: Path) -
 
     monkeypatch.setattr("core.paths.get_bundle_root", lambda: bundle_root)
     installer = AppRuntimeInstaller()
+    monkeypatch.setattr(
+        installer,
+        "_resolve_remote_ffmpeg_spec",
+        lambda: (_ for _ in ()).throw(RuntimeInstallError("network disabled")),
+    )
 
     status = installer.install_package("ffmpeg")
 
@@ -41,5 +46,5 @@ def test_mpc_be_status_reports_installable_when_source_exists(monkeypatch, tmp_p
     status = installer.get_status("mpc_be")
 
     assert status.installed is False
-    assert status.status_text == "설치 가능"
+    assert status.status_text == "로컬 설치 가능"
     assert status.source_label == str(source_dir)

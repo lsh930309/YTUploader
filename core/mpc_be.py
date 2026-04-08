@@ -253,32 +253,38 @@ class MPCBEController:
 
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         for source_dir in self._iter_runtime_source_dirs():
-            source_executable = source_dir / "mpc-be64.exe"
-            if not source_executable.exists():
-                continue
-
-            for source_path in source_dir.rglob("*"):
-                if source_path.is_dir():
-                    continue
-                if source_path.suffix.lower() == ".ini":
-                    continue
-
-                relative_path = source_path.relative_to(source_dir)
-                destination = self.runtime_dir / relative_path
-                if source_path == source_executable:
-                    destination = self.executable_path
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                if destination.exists() and destination.stat().st_size == source_path.stat().st_size:
-                    continue
-                shutil.copy2(source_path, destination)
-
-            self._ensure_profile_exists()
-            return self.executable_path
+            installed = self.install_from_source_dir(source_dir)
+            if installed is not None:
+                return installed
 
         raise MPCBEError(
             "MPC-BE 런타임을 찾지 못했습니다. 내장 미리보기를 사용하려면 "
             "bin/mpc-be 또는 bin/mpc-be64.exe를 패키징하거나, 이 PC에 MPC-BE를 설치해야 합니다."
         )
+
+    def install_from_source_dir(self, source_dir: Path) -> Path | None:
+        source_executable = source_dir / "mpc-be64.exe"
+        if not source_executable.exists():
+            return None
+
+        self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        for source_path in source_dir.rglob("*"):
+            if source_path.is_dir():
+                continue
+            if source_path.suffix.lower() == ".ini":
+                continue
+
+            relative_path = source_path.relative_to(source_dir)
+            destination = self.runtime_dir / relative_path
+            if source_path == source_executable:
+                destination = self.executable_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.exists() and destination.stat().st_size == source_path.stat().st_size:
+                continue
+            shutil.copy2(source_path, destination)
+
+        self._ensure_profile_exists()
+        return self.executable_path
 
     def import_settings(self) -> MPCBESettingsSource | None:
         for source in self.discover_settings_sources():

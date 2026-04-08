@@ -35,7 +35,7 @@ def test_get_mpc_be_paths_use_isolated_runtime_dir(monkeypatch, tmp_path: Path) 
 
 def test_binary_path_prefers_private_tool_runtime(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    runtime_executable = paths.get_tool_runtime_path("ffmpeg")
+    runtime_executable = paths.get_ffmpeg_runtime_binary_path("ffmpeg")
     runtime_executable.parent.mkdir(parents=True, exist_ok=True)
     runtime_executable.write_text("exe", encoding="utf-8")
 
