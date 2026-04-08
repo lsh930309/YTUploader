@@ -41,3 +41,32 @@ def test_suggest_output_path_appends_suffix(tmp_path: Path) -> None:
 
     assert manager.suggest_output_path(input_file) == tmp_path / "recording_edited.mp4"
 
+
+def test_set_obs_source_dir_and_list_recent_recordings(tmp_path: Path) -> None:
+    source_dir = tmp_path / "obs"
+    source_dir.mkdir()
+    newer = source_dir / "newer.mkv"
+    older = source_dir / "older.mkv"
+    older.write_text("older", encoding="utf-8")
+    newer.write_text("newer", encoding="utf-8")
+
+    manager = DataManager(settings_path=tmp_path / "settings.json")
+    manager.set_obs_source_dir(source_dir)
+
+    listed = manager.list_recent_obs_recordings(limit=5)
+    assert newer in listed
+    assert older in listed
+
+
+def test_pick_recording_updates_recent_file_history(tmp_path: Path) -> None:
+    manager = DataManager(settings_path=tmp_path / "settings.json")
+    first = tmp_path / "one.mkv"
+    second = tmp_path / "two.mkv"
+    first.write_text("1", encoding="utf-8")
+    second.write_text("2", encoding="utf-8")
+
+    manager.pick_recording(first)
+    settings = manager.pick_recording(second)
+
+    assert settings["recent_source_files"][0] == str(second)
+    assert settings["recent_source_files"][1] == str(first)

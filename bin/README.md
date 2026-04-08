@@ -5,6 +5,7 @@
 - `ffmpeg.exe`
 - `ffprobe.exe`
 - `mkvmerge.exe`
+- `mpc-be64.exe`
+- 또는 `mpc-be/` 디렉터리 전체
 
 바이너리는 크기와 라이선스 이슈 때문에 저장소에 포함하지 않습니다. 각 도구의 공식 배포본을 내려받아 이 위치에 복사한 뒤 `build_script.py`를 실행하세요.
-

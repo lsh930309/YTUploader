@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import logging
@@ -5,6 +6,7 @@ import sys
 import traceback
 from datetime import datetime
 
+from PyQt6.QtCore import QLocale
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from core.paths import APP_NAME, ensure_runtime_dirs, get_logs_dir
@@ -34,15 +36,21 @@ def install_exception_hook() -> None:
 
         traceback_text = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
         logging.critical("Unhandled exception\n%s", traceback_text)
-        QMessageBox.critical(None, "Unhandled Error", str(exc_value))
+        QMessageBox.critical(None, "처리되지 않은 오류", str(exc_value))
 
     sys.excepthook = handle_exception
+
+
+def apply_korean_locale() -> None:
+    locale = QLocale(QLocale.Language.Korean, QLocale.Country.SouthKorea)
+    QLocale.setDefault(locale)
 
 
 def main() -> int:
     ensure_runtime_dirs()
     configure_logging()
 
+    apply_korean_locale()
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     install_exception_hook()
@@ -54,4 +62,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

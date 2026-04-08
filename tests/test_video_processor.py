@@ -5,11 +5,14 @@ from pathlib import Path
 import pytest
 
 from core.video_processor import (
+    ClipJob,
     VideoJob,
     VideoValidationError,
     build_remux_command,
     build_sync_command,
+    build_thumbnail_command,
     parse_timecode,
+    validate_clip_job,
     validate_job,
 )
 
@@ -64,3 +67,37 @@ def test_build_remux_command_contains_copy_pipeline(tmp_path: Path) -> None:
         str(tmp_path / "out.mp4"),
     ]
 
+
+def test_validate_clip_job_rejects_thumbnail_outside_range(tmp_path: Path) -> None:
+    clip = ClipJob(
+        clip_id="clip-1",
+        clip_name="clip_01",
+        output_mp4=tmp_path / "clip.mp4",
+        start_time="00:00:10",
+        end_time="00:00:20",
+        thumbnail_time="00:00:05",
+    )
+
+    with pytest.raises(VideoValidationError):
+        validate_clip_job(clip)
+
+
+def test_build_thumbnail_command_contains_expected_arguments(tmp_path: Path) -> None:
+    command = build_thumbnail_command(
+        source_mkv=tmp_path / "input.mkv",
+        thumbnail_time="00:01:23",
+        output_path=tmp_path / "thumb.png",
+        ffmpeg_executable=Path("ffmpeg.exe"),
+    )
+
+    assert command == [
+        "ffmpeg.exe",
+        "-y",
+        "-ss",
+        "00:01:23",
+        "-i",
+        str(tmp_path / "input.mkv"),
+        "-frames:v",
+        "1",
+        str(tmp_path / "thumb.png"),
+    ]

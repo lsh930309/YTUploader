@@ -7,6 +7,8 @@ from pathlib import Path
 
 APP_NAME = "YTUploader"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+MPC_BE_RUNTIME_EXE = "ytuploader-mpc-be.exe"
+MPC_BE_RUNTIME_INI = "ytuploader-mpc-be.ini"
 
 
 def is_frozen() -> bool:
@@ -46,6 +48,10 @@ def get_settings_path() -> Path:
     return get_user_data_root() / "settings.json"
 
 
+def get_catalog_db_path() -> Path:
+    return get_user_data_root() / "catalog.db"
+
+
 def get_credentials_dir() -> Path:
     return get_user_data_root() / "credentials"
 
@@ -66,6 +72,31 @@ def get_logs_dir() -> Path:
     return get_user_data_root() / "logs"
 
 
+def get_mpc_be_dir() -> Path:
+    return get_user_data_root() / "mpc-be"
+
+
+def get_mpc_be_runtime_dir() -> Path:
+    return get_mpc_be_dir() / "runtime"
+
+
+def get_tool_runtime_dir() -> Path:
+    return get_user_data_root() / "tools"
+
+
+def get_tool_runtime_path(name: str) -> Path:
+    executable_name = name if name.lower().endswith(".exe") else f"{name}.exe"
+    return get_tool_runtime_dir() / executable_name
+
+
+def get_mpc_be_runtime_executable_path() -> Path:
+    return get_mpc_be_runtime_dir() / MPC_BE_RUNTIME_EXE
+
+
+def get_mpc_be_ini_path() -> Path:
+    return get_mpc_be_runtime_dir() / MPC_BE_RUNTIME_INI
+
+
 def get_icon_path() -> Path:
     return resource_path("assets", "app.ico")
 
@@ -73,6 +104,7 @@ def get_icon_path() -> Path:
 def binary_path(name: str) -> Path:
     executable_name = name if name.lower().endswith(".exe") else f"{name}.exe"
     candidates = [
+        get_tool_runtime_path(executable_name),
         resource_path("bin", executable_name),
         get_project_root() / "bin" / executable_name,
     ]
@@ -95,8 +127,10 @@ def ensure_runtime_dirs() -> dict[str, Path]:
         "credentials": get_credentials_dir(),
         "temp": get_temp_root(),
         "logs": get_logs_dir(),
+        "tools": get_tool_runtime_dir(),
+        "mpc_be": get_mpc_be_dir(),
+        "mpc_be_runtime": get_mpc_be_runtime_dir(),
     }
     for directory in directories.values():
         directory.mkdir(parents=True, exist_ok=True)
     return directories
-
