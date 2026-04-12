@@ -73,6 +73,22 @@ def get_logs_dir() -> Path:
     return get_user_data_root() / "logs"
 
 
+def get_jobs_dir() -> Path:
+    return get_user_data_root() / "jobs"
+
+
+def get_job_dir(job_id: str) -> Path:
+    return get_jobs_dir() / job_id
+
+
+def get_job_state_path(job_id: str) -> Path:
+    return get_job_dir(job_id) / "job.json"
+
+
+def get_job_artifacts_dir(job_id: str) -> Path:
+    return get_job_dir(job_id) / "artifacts"
+
+
 def get_mpc_be_dir() -> Path:
     return get_user_data_root() / "mpc-be"
 
@@ -191,6 +207,7 @@ def ensure_runtime_dirs() -> dict[str, Path]:
         "credentials": get_credentials_dir(),
         "temp": get_temp_root(),
         "logs": get_logs_dir(),
+        "jobs": get_jobs_dir(),
         "tools": get_tool_runtime_dir(),
         "ffmpeg_runtime": get_ffmpeg_runtime_dir(),
         "mkvtoolnix_runtime": get_mkvtoolnix_runtime_dir(),

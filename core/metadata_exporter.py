@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .models import ChapterMarker, ClipDraft, ClipExport, ExportBundle, JobDraft
+from .models import ChapterMarker, ClipDraft, ClipExport, ExportBundle, JobDraft, JobState, SegmentState
 
 
 def format_chapters(chapters: list[ChapterMarker]) -> str:
@@ -49,6 +49,86 @@ def build_clip_description(job: JobDraft, clip: ClipDraft) -> str:
     return "\n\n".join(section for section in sections if section.strip())
 
 
+def build_segment_description(job: JobState, segment: SegmentState) -> str:
+    if segment.description_text.strip():
+        return segment.description_text.strip()
+    draft_like = ClipDraft(
+        clip_id=segment.clip_id,
+        clip_name=segment.clip_name,
+        start_time=segment.start_time,
+        end_time=segment.end_time,
+        thumbnail_time=segment.thumbnail_time,
+        custom_title=segment.custom_title,
+        custom_notes=segment.custom_notes,
+        upload_enabled=segment.upload_enabled,
+        chapters=list(segment.chapters),
+    )
+    draft_job = JobDraft(
+        job_id=job.job_id,
+        source_path=job.source_path,
+        obs_source_dir=job.obs_source_dir,
+        delay_ms=job.delay_ms,
+        game=job.game,
+        preset=job.preset,
+        characters=job.characters,
+        build_info=job.build_info,
+        tags=list(job.tags),
+        title_prefix=job.title_prefix,
+        description_template=job.description_template,
+        playlist_id=job.playlist_id,
+        privacy_status=job.privacy_status,
+        category_id=job.category_id,
+        clips=[],
+    )
+    return build_clip_description(draft_job, draft_like)
+
+
+def build_segment_sidecar_payload(job: JobState, segment: SegmentState) -> dict[str, Any]:
+    title = build_clip_title(job.title_prefix, segment.custom_title)
+    description = build_segment_description(job, segment)
+    return {
+        "job_id": job.job_id,
+        "source_path": str(job.source_path),
+        "obs_source_dir": str(job.obs_source_dir) if job.obs_source_dir else "",
+        "clip": {
+            "clip_id": segment.clip_id,
+            "clip_name": segment.clip_name,
+            "start_time": segment.start_time,
+            "end_time": segment.end_time,
+            "thumbnail_time": segment.thumbnail_time,
+            "custom_title": segment.custom_title,
+            "custom_notes": segment.custom_notes,
+            "upload_enabled": segment.upload_enabled,
+            "chapters": [
+                {"timecode": chapter.timecode, "title": chapter.title}
+                for chapter in segment.chapters
+            ],
+        },
+        "metadata": {
+            "title": title,
+            "description": description,
+            "tags": list(job.tags),
+            "playlist_id": job.playlist_id,
+            "privacy_status": job.privacy_status,
+            "category_id": segment.category_id or job.category_id,
+            "game": job.game,
+            "preset": job.preset,
+            "characters": job.characters,
+            "build_info": job.build_info,
+        },
+        "outputs": {
+            "video_path": str(segment.output_path) if segment.output_path else "",
+            "thumbnail_path": str(segment.thumbnail_path) if segment.thumbnail_path else "",
+        },
+        "upload": {
+            "status": segment.upload_status,
+            "video_id": segment.upload_video_id,
+            "url": segment.upload_url,
+            "error_message": segment.upload_error,
+        },
+    }
+
+
 def build_clip_sidecar_payload(job: JobDraft, clip: ClipDraft, output_path: Path, thumbnail_path: Path | None) -> dict[str, Any]:
     title = build_clip_title(job.title_prefix, clip.custom_title)
     description = build_clip_description(job, clip)
@@ -62,6 +142,8 @@ def build_clip_sidecar_payload(job: JobDraft, clip: ClipDraft, output_path: Path
             "start_time": clip.start_time,
             "end_time": clip.end_time,
             "thumbnail_time": clip.thumbnail_time,
+            "custom_title": clip.custom_title,
+            "custom_notes": clip.custom_notes,
             "upload_enabled": clip.upload_enabled,
             "chapters": [
                 {"timecode": chapter.timecode, "title": chapter.title}
@@ -84,6 +166,12 @@ def build_clip_sidecar_payload(job: JobDraft, clip: ClipDraft, output_path: Path
             "video_path": str(output_path),
             "thumbnail_path": str(thumbnail_path) if thumbnail_path else "",
         },
+        "upload": {
+            "status": "pending",
+            "video_id": "",
+            "url": "",
+            "error_message": "",
+        },
     }
 
 
@@ -91,6 +179,10 @@ def write_sidecar(path: Path, payload: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
     return path
+
+
+def read_sidecar(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def build_clipboard_payload(payload: dict[str, Any]) -> str:

@@ -455,6 +455,15 @@ class MPCBEController:
             SWP_NOZORDER | SWP_NOACTIVATE,
         )
 
+    def stabilize_embedded_window(self, width: int, height: int) -> None:
+        if not self._is_windows() or self._player_hwnd is None or self._host_hwnd is None:
+            return
+        self.attach_embedded_window(
+            host_hwnd=int(self._host_hwnd),
+            width=max(int(width), 1),
+            height=max(int(height), 1),
+        )
+
     def open_file(self, media_path: Path, *, sender_hwnd: int | None = None) -> None:
         if not media_path.exists():
             raise MPCBEError(f"미리보기 소스 파일이 존재하지 않습니다: {media_path}")

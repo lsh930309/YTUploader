@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtGui import QResizeEvent
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QSizePolicy, QWidget
 
 from core.mpc_be import (
     CMD_CONNECT,
@@ -30,6 +30,7 @@ class MPCBEPreviewHost(QWidget):
     connection_changed = pyqtSignal(bool)
     position_changed = pyqtSignal(str)
     api_event = pyqtSignal(object)
+    double_clicked = pyqtSignal()
 
     def __init__(self, controller: MPCBEController | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -37,10 +38,14 @@ class MPCBEPreviewHost(QWidget):
         self.current_seconds = 0.0
         self.current_timecode = "00:00:00.000"
         self.setMinimumHeight(320)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setStyleSheet("background-color: #000000; border: 1px solid #303030;")
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(500)
         self._poll_timer.timeout.connect(self.request_current_position)
+        self._stabilize_timer = QTimer(self)
+        self._stabilize_timer.setInterval(750)
+        self._stabilize_timer.timeout.connect(self._stabilize_embedded_window)
 
     @property
     def host_hwnd(self) -> int:
@@ -61,6 +66,7 @@ class MPCBEPreviewHost(QWidget):
                     start_time=start_time,
                 )
             self._poll_timer.start()
+            self._stabilize_timer.start()
             self.log.emit(f"내장 미리보기에 {media_path.name} 파일을 불러왔습니다.")
         except Exception as exc:  # pragma: no cover - UI surface
             self.error.emit(str(exc))
@@ -86,25 +92,43 @@ class MPCBEPreviewHost(QWidget):
     def request_current_position(self) -> None:
         if not self.controller.is_connected:
             self._poll_timer.stop()
+            self._stabilize_timer.stop()
             return
         try:
+            self._stabilize_embedded_window()
             self.controller.request_current_position(sender_hwnd=self.host_hwnd)
         except MPCBEError:
             self._poll_timer.stop()
+            self._stabilize_timer.stop()
         except Exception as exc:  # pragma: no cover - UI surface
             self.error.emit(str(exc))
 
     def shutdown(self) -> None:
         self._poll_timer.stop()
+        self._stabilize_timer.stop()
         self.controller.shutdown()
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
-        self.controller.resize_embedded_window(self.width(), self.height())
+        self._stabilize_embedded_window()
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        if self.controller.is_connected:
+            self._stabilize_timer.start()
+            self._stabilize_embedded_window()
+
+    def hideEvent(self, event) -> None:  # type: ignore[override]
+        self._stabilize_timer.stop()
+        super().hideEvent(event)
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         self.shutdown()
         super().closeEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # type: ignore[override]
+        self.double_clicked.emit()
+        super().mouseDoubleClickEvent(event)
 
     def nativeEvent(self, event_type, message):  # type: ignore[override]
         if hasattr(event_type, "data"):
@@ -138,6 +162,8 @@ class MPCBEPreviewHost(QWidget):
         self.api_event.emit(event)
         if event.command == CMD_CONNECT:
             self.connection_changed.emit(True)
+            self._stabilize_timer.start()
+            self._stabilize_embedded_window()
             self.log.emit("내장 MPC-BE 미리보기가 연결되었습니다.")
             return
 
@@ -150,6 +176,7 @@ class MPCBEPreviewHost(QWidget):
         if event.command == CMD_DISCONNECT:
             self.connection_changed.emit(False)
             self._poll_timer.stop()
+            self._stabilize_timer.stop()
             self.log.emit("내장 MPC-BE 미리보기가 연결 해제되었습니다.")
 
     def _send_simple_command(self, callback) -> None:
@@ -157,3 +184,8 @@ class MPCBEPreviewHost(QWidget):
             callback(sender_hwnd=self.host_hwnd)
         except Exception as exc:  # pragma: no cover - UI surface
             self.error.emit(str(exc))
+
+    def _stabilize_embedded_window(self) -> None:
+        if not self.isVisible():
+            return
+        self.controller.stabilize_embedded_window(self.width(), self.height())

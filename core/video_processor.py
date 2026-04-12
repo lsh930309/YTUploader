@@ -247,30 +247,21 @@ class VideoProcessor:
 
         temp_dir = temp_dir or create_job_temp_dir()
         temp_mkv = temp_dir / "synced.mkv"
-        rendered_paths: list[Path] = []
 
         try:
-            self._emit_stage(stage_callback, VALIDATING)
-            self._emit_log(log_callback, f"소스 검증 완료: {input_mkv}")
-            self._ensure_not_cancelled()
-
-            self._emit_stage(stage_callback, SYNCING)
-            self._emit_log(log_callback, "오디오 싱크 보정을 위해 mkvmerge를 실행합니다.")
-            sync_job = VideoJob(input_mkv=input_mkv, output_mp4=temp_dir / "placeholder.mp4", delay_ms=delay_ms)
-            sync_command = build_sync_command(sync_job, temp_mkv, mkvmerge_executable=self.mkvmerge_executable)
-            self._run_command(sync_command, log_callback=log_callback)
-            self._ensure_not_cancelled()
-
-            self._emit_stage(stage_callback, REMUXING)
-            for clip in clips:
-                clip.output_mp4.parent.mkdir(parents=True, exist_ok=True)
-                self._emit_log(log_callback, f"클립 export 준비: {clip.clip_name} -> {clip.output_mp4.name}")
-            rendered_paths = self.losslesscut_controller.export_clips(
-                source_path=temp_mkv,
-                clips=clips,
+            synced_path = self.apply_audio_sync(
+                input_mkv=input_mkv,
+                delay_ms=delay_ms,
+                output_path=temp_mkv,
+                stage_callback=stage_callback,
                 log_callback=log_callback,
             )
-            self._ensure_not_cancelled()
+            rendered_paths = self.split_clips(
+                source_mkv=synced_path,
+                clips=clips,
+                stage_callback=stage_callback,
+                log_callback=log_callback,
+            )
 
             self._emit_stage(stage_callback, CLEANUP)
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -287,6 +278,56 @@ class VideoProcessor:
         finally:
             self._current_process = None
             self._cancel_requested = False
+
+    def apply_audio_sync(
+        self,
+        *,
+        input_mkv: Path,
+        delay_ms: int,
+        output_path: Path,
+        stage_callback: StageCallback = None,
+        log_callback: LogCallback = None,
+    ) -> Path:
+        if not input_mkv.exists():
+            raise VideoValidationError(f"입력 MKV 파일이 존재하지 않습니다: {input_mkv}")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._emit_stage(stage_callback, VALIDATING)
+        self._emit_log(log_callback, f"소스 검증 완료: {input_mkv}")
+        self._ensure_not_cancelled()
+        self._emit_stage(stage_callback, SYNCING)
+        self._emit_log(log_callback, "오디오 싱크 보정을 위해 mkvmerge를 실행합니다.")
+        sync_job = VideoJob(input_mkv=input_mkv, output_mp4=output_path.with_suffix(".mp4"), delay_ms=delay_ms)
+        sync_command = build_sync_command(sync_job, output_path, mkvmerge_executable=self.mkvmerge_executable)
+        self._run_command(sync_command, log_callback=log_callback)
+        self._ensure_not_cancelled()
+        self._emit_log(log_callback, f"오디오 싱크 적용 완료: {output_path.name}")
+        return output_path
+
+    def split_clips(
+        self,
+        *,
+        source_mkv: Path,
+        clips: list[ClipJob],
+        stage_callback: StageCallback = None,
+        log_callback: LogCallback = None,
+    ) -> list[Path]:
+        if not source_mkv.exists():
+            raise VideoValidationError(f"세그먼트 분할 소스가 존재하지 않습니다: {source_mkv}")
+        if not clips:
+            raise VideoValidationError("클립은 하나 이상 정의해야 합니다.")
+        for clip in clips:
+            validate_clip_job(clip)
+        self._emit_stage(stage_callback, REMUXING)
+        for clip in clips:
+            clip.output_mp4.parent.mkdir(parents=True, exist_ok=True)
+            self._emit_log(log_callback, f"클립 export 준비: {clip.clip_name} -> {clip.output_mp4.name}")
+        rendered_paths = self.losslesscut_controller.export_clips(
+            source_path=source_mkv,
+            clips=clips,
+            log_callback=log_callback,
+        )
+        self._ensure_not_cancelled()
+        return rendered_paths
 
     def capture_thumbnail(
         self,
