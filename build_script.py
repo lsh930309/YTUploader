@@ -40,6 +40,12 @@ def build_command() -> list[str]:
         else:
             print(f"Warning: {candidate} not found and will not be packaged.")
 
+    losslesscut_dir = PROJECT_ROOT / "bin" / "losslesscut"
+    if losslesscut_dir.exists():
+        command.extend(["--add-data", f"{losslesscut_dir}{separator}bin/losslesscut"])
+    else:
+        print(f"Warning: {losslesscut_dir} not found and will not be packaged.")
+
     mpc_be_dir = PROJECT_ROOT / "bin" / "mpc-be"
     if mpc_be_dir.exists():
         command.extend(["--add-data", f"{mpc_be_dir}{separator}bin/mpc-be"])

@@ -10,7 +10,9 @@ from PyQt6.QtCore import QLocale
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from core.paths import APP_NAME, ensure_runtime_dirs, get_logs_dir
+from core.runtime_installer import AppRuntimeInstaller
 from ui.main_window import MainWindow
+from ui.runtime_setup_dialog import RuntimeSetupDialog
 
 
 def configure_logging() -> None:
@@ -54,6 +56,12 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     install_exception_hook()
+
+    runtime_installer = AppRuntimeInstaller()
+    if not runtime_installer.is_ready():
+        dialog = RuntimeSetupDialog(runtime_installer=runtime_installer)
+        if dialog.exec() != RuntimeSetupDialog.DialogCode.Accepted:
+            return 0
 
     window = MainWindow()
     window.show()

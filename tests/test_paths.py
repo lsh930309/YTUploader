@@ -33,6 +33,16 @@ def test_get_mpc_be_paths_use_isolated_runtime_dir(monkeypatch, tmp_path: Path) 
     assert paths.get_mpc_be_ini_path() == tmp_path / paths.APP_NAME / "mpc-be" / "runtime" / "ytuploader-mpc-be.ini"
 
 
+def test_get_losslesscut_paths_use_isolated_runtime_dir(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert paths.get_losslesscut_runtime_dir() == tmp_path / paths.APP_NAME / "losslesscut" / "runtime"
+    assert paths.get_losslesscut_config_dir() == tmp_path / paths.APP_NAME / "losslesscut" / "config"
+    assert (
+        paths.get_losslesscut_runtime_executable_path()
+        == tmp_path / paths.APP_NAME / "losslesscut" / "runtime" / "LosslessCut.exe"
+    )
+
+
 def test_binary_path_prefers_private_tool_runtime(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     runtime_executable = paths.get_ffmpeg_runtime_binary_path("ffmpeg")
@@ -40,3 +50,12 @@ def test_binary_path_prefers_private_tool_runtime(monkeypatch, tmp_path: Path) -
     runtime_executable.write_text("exe", encoding="utf-8")
 
     assert paths.binary_path("ffmpeg") == runtime_executable
+
+
+def test_binary_path_prefers_losslesscut_runtime(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    runtime_executable = paths.get_losslesscut_runtime_executable_path()
+    runtime_executable.parent.mkdir(parents=True, exist_ok=True)
+    runtime_executable.write_text("exe", encoding="utf-8")
+
+    assert paths.binary_path("losslesscut") == runtime_executable

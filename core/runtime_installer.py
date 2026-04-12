@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import shutil
 import subprocess
@@ -13,6 +14,7 @@ from typing import Callable, Optional
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+from .losslesscut import LosslessCutController
 from .mpc_be import MPCBEController, MPCBEError
 from .paths import (
     get_ffmpeg_runtime_binary_path,
@@ -31,6 +33,7 @@ FFMPEG_RELEASE_ARCHIVE_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-
 FFMPEG_RELEASE_CHECKSUM_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip.sha256"
 MKVTOOLNIX_RELEASES_URL = "https://mkvtoolnix.download/windows/releases/"
 MPC_BE_RELEASES_URL = "https://sourceforge.net/projects/mpcbe/files/MPC-BE/Release%20builds/"
+LOSSLESSCUT_LATEST_RELEASE_API_URL = "https://api.github.com/repos/mifi/lossless-cut/releases/latest"
 
 
 @dataclass(slots=True)
@@ -59,8 +62,8 @@ class RemotePackageSpec:
     label: str
     version: str
     download_url: str
-    checksum_url: str
-    checksum_algorithm: str
+    checksum_url: str | None
+    checksum_algorithm: str | None
     checksum_target_name: str | None
     archive_kind: str
     source_label: str
@@ -71,13 +74,17 @@ class RuntimeInstallError(RuntimeError):
 
 
 class AppRuntimeInstaller:
-    PACKAGE_IDS = ("ffmpeg", "mkvmerge", "mpc_be")
+    PACKAGE_IDS = ("losslesscut", "mkvmerge", "mpc_be")
+    OPTIONAL_PACKAGE_IDS = ("ffmpeg",)
+    REQUIRED_PACKAGE_IDS = PACKAGE_IDS
     PACKAGE_LABELS = {
+        "losslesscut": "LosslessCut",
         "ffmpeg": "FFmpeg / FFprobe",
         "mkvmerge": "MKVMerge",
         "mpc_be": "MPC-BE",
     }
     REMOTE_SOURCE_LABELS = {
+        "losslesscut": "GitHub 공식 LosslessCut Windows 배포본",
         "ffmpeg": "ffmpeg.org가 안내하는 gyan.dev Windows 빌드",
         "mkvmerge": "mkvtoolnix.download 공식 Windows 배포본",
         "mpc_be": "SourceForge 공식 MPC-BE 배포본",
@@ -86,14 +93,41 @@ class AppRuntimeInstaller:
     def __init__(
         self,
         *,
+        losslesscut_controller: LosslessCutController | None = None,
         mpc_be_controller: MPCBEController | None = None,
     ) -> None:
+        self.losslesscut_controller = losslesscut_controller or LosslessCutController()
         self.mpc_be_controller = mpc_be_controller or MPCBEController()
 
     def list_statuses(self) -> list[RuntimePackageStatus]:
         return [self.get_status(package_id) for package_id in self.PACKAGE_IDS]
 
+    def get_required_statuses(self) -> list[RuntimePackageStatus]:
+        return [self.get_status(package_id) for package_id in self.REQUIRED_PACKAGE_IDS]
+
+    def is_ready(self) -> bool:
+        return all(status.installed for status in self.get_required_statuses())
+
+    def missing_required_package_ids(self) -> list[str]:
+        return [status.package_id for status in self.get_required_statuses() if not status.installed]
+
     def get_status(self, package_id: str) -> RuntimePackageStatus:
+        if package_id == "losslesscut":
+            installed_paths = (self.losslesscut_controller.executable_path,)
+            installed = installed_paths[0].exists()
+            source = self._resolve_losslesscut_source()
+            source_label = source.label if source else self.REMOTE_SOURCE_LABELS["losslesscut"]
+            source_kind = source.kind if source else "remote"
+            return RuntimePackageStatus(
+                package_id="losslesscut",
+                label=self.PACKAGE_LABELS["losslesscut"],
+                installed=installed,
+                status_text=self._build_status_text(installed=installed, source_kind=source_kind),
+                source_kind=source_kind,
+                source_label=source_label,
+                installed_paths=installed_paths,
+            )
+
         if package_id == "ffmpeg":
             installed_paths = (
                 get_ffmpeg_runtime_binary_path("ffmpeg"),
@@ -157,7 +191,9 @@ class AppRuntimeInstaller:
         *,
         log_callback: LogCallback = None,
     ) -> RuntimePackageStatus:
-        if package_id == "ffmpeg":
+        if package_id == "losslesscut":
+            self._install_losslesscut(log_callback=log_callback)
+        elif package_id == "ffmpeg":
             self._install_ffmpeg(log_callback=log_callback)
         elif package_id == "mkvmerge":
             self._install_mkvmerge(log_callback=log_callback)
@@ -166,6 +202,28 @@ class AppRuntimeInstaller:
         else:
             raise RuntimeInstallError(f"지원하지 않는 런타임 패키지입니다: {package_id}")
         return self.get_status(package_id)
+
+    def _install_losslesscut(self, *, log_callback: LogCallback = None) -> None:
+        source = self._resolve_losslesscut_source()
+        remote_error: Exception | None = None
+
+        try:
+            spec = self._resolve_remote_losslesscut_spec()
+            self._emit_log(log_callback, f"{spec.label} 최신 버전을 공식 웹에서 내려받습니다. ({spec.version})")
+            self._install_losslesscut_from_remote(spec, log_callback=log_callback)
+            return
+        except Exception as exc:
+            remote_error = exc
+            self._emit_log(log_callback, f"공식 웹 설치에 실패했습니다: {exc}")
+
+        if source is not None:
+            self._emit_log(log_callback, f"로컬 원본으로 대체 설치를 진행합니다: {source.label}")
+            self._install_losslesscut_from_local(source, log_callback=log_callback)
+            return
+
+        raise RuntimeInstallError(
+            "LosslessCut 공식 웹 설치에 실패했습니다. 네트워크 상태를 확인하거나 나중에 다시 시도해 주세요."
+        ) from remote_error
 
     def _install_ffmpeg(self, *, log_callback: LogCallback = None) -> None:
         source = self._resolve_ffmpeg_source()
@@ -186,8 +244,7 @@ class AppRuntimeInstaller:
             return
 
         raise RuntimeInstallError(
-            "FFmpeg / FFprobe 공식 웹 설치에 실패했습니다. "
-            "네트워크 상태를 확인하거나 나중에 다시 시도해 주세요."
+            "FFmpeg / FFprobe 공식 웹 설치에 실패했습니다. 네트워크 상태를 확인하거나 나중에 다시 시도해 주세요."
         ) from remote_error
 
     def _install_mkvmerge(self, *, log_callback: LogCallback = None) -> None:
@@ -238,12 +295,42 @@ class AppRuntimeInstaller:
             "MPC-BE 공식 웹 설치에 실패했습니다. 네트워크 상태를 확인하거나 나중에 다시 시도해 주세요."
         ) from remote_error
 
+    def _install_losslesscut_from_remote(self, spec: RemotePackageSpec, *, log_callback: LogCallback = None) -> None:
+        with self._temporary_work_dir("losslesscut") as work_dir_text:
+            work_dir = Path(work_dir_text)
+            archive_path = work_dir / f"LosslessCut-{spec.version}.7z"
+            self._download_file(spec.download_url, archive_path, log_callback=log_callback)
+            expected = self._read_checksum(spec, log_callback=log_callback)
+            if expected is not None and spec.checksum_algorithm is not None:
+                self._verify_file_checksum(archive_path, expected, spec.checksum_algorithm)
+
+            extract_dir = work_dir / "extract"
+            extract_dir.mkdir(parents=True, exist_ok=True)
+            completed = subprocess.run(
+                ["tar", "-xf", str(archive_path), "-C", str(extract_dir)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if completed.returncode != 0:
+                raise RuntimeInstallError(
+                    f"LosslessCut 압축 해제에 실패했습니다.\n{completed.stdout}\n{completed.stderr}".strip()
+                )
+
+            source_dir = self._find_required_file(extract_dir, "LosslessCut.exe").parent
+            installed_path = self.losslesscut_controller.install_from_source_dir(source_dir)
+            if installed_path is None:
+                raise RuntimeInstallError("압축 해제된 LosslessCut 폴더에서 실행 파일을 찾지 못했습니다.")
+            self._emit_log(log_callback, f"설치됨: {installed_path}")
+
     def _install_ffmpeg_from_remote(self, spec: RemotePackageSpec, *, log_callback: LogCallback = None) -> None:
         with self._temporary_work_dir("ffmpeg") as work_dir_text:
             work_dir = Path(work_dir_text)
             archive_path = work_dir / "ffmpeg-release-essentials.zip"
             self._download_file(spec.download_url, archive_path, log_callback=log_callback)
             expected = self._read_checksum(spec, log_callback=log_callback)
+            if expected is None or spec.checksum_algorithm is None:
+                raise RuntimeInstallError("FFmpeg 체크섬 정보가 없어 설치를 계속할 수 없습니다.")
             self._verify_file_checksum(archive_path, expected, spec.checksum_algorithm)
 
             extract_dir = work_dir / "extract"
@@ -265,6 +352,8 @@ class AppRuntimeInstaller:
             archive_path = work_dir / f"mkvtoolnix-{spec.version}.zip"
             self._download_file(spec.download_url, archive_path, log_callback=log_callback)
             expected = self._read_checksum(spec, log_callback=log_callback)
+            if expected is None or spec.checksum_algorithm is None:
+                raise RuntimeInstallError("MKVToolNix 체크섬 정보가 없어 설치를 계속할 수 없습니다.")
             self._verify_file_checksum(archive_path, expected, spec.checksum_algorithm)
 
             extract_dir = work_dir / "extract"
@@ -281,6 +370,8 @@ class AppRuntimeInstaller:
             archive_path = work_dir / f"MPC-BE.{spec.version}.x64.7z"
             self._download_file(spec.download_url, archive_path, log_callback=log_callback)
             expected = self._read_checksum(spec, log_callback=log_callback)
+            if expected is None or spec.checksum_algorithm is None:
+                raise RuntimeInstallError("MPC-BE 체크섬 정보가 없어 설치를 계속할 수 없습니다.")
             self._verify_file_checksum(archive_path, expected, spec.checksum_algorithm)
 
             extract_dir = work_dir / "extract"
@@ -302,6 +393,17 @@ class AppRuntimeInstaller:
                 raise RuntimeInstallError("압축 해제된 MPC-BE 폴더에서 실행 파일을 찾지 못했습니다.")
             self._emit_log(log_callback, f"설치됨: {installed_path}")
 
+    def _install_losslesscut_from_local(self, source: RuntimeSource, *, log_callback: LogCallback = None) -> None:
+        source_dir = source.directory
+        if source_dir is None and source.paths:
+            source_dir = source.paths[0].parent
+        if source_dir is None:
+            raise RuntimeInstallError("로컬 LosslessCut 원본을 찾지 못했습니다.")
+        installed_path = self.losslesscut_controller.install_from_source_dir(source_dir)
+        if installed_path is None:
+            raise RuntimeInstallError("로컬 LosslessCut 원본에서 실행 파일을 찾지 못했습니다.")
+        self._emit_log(log_callback, f"설치됨: {installed_path}")
+
     def _install_ffmpeg_from_local(self, source: RuntimeSource, *, log_callback: LogCallback = None) -> None:
         assert len(source.paths) >= 2
         destination_dir = get_ffmpeg_runtime_dir() / "bin"
@@ -319,7 +421,37 @@ class AppRuntimeInstaller:
             self._copy_file(source.paths[0], destination)
         else:
             raise RuntimeInstallError("로컬 MKVMerge 원본을 찾지 못했습니다.")
-        self._emit_log(log_callback, f"설치됨: {get_mkvmerge_runtime_path() if get_mkvmerge_runtime_path().exists() else get_tool_runtime_path('mkvmerge')}")
+        installed_path = get_mkvmerge_runtime_path() if get_mkvmerge_runtime_path().exists() else get_tool_runtime_path("mkvmerge")
+        self._emit_log(log_callback, f"설치됨: {installed_path}")
+
+    def _resolve_losslesscut_source(self) -> RuntimeSource | None:
+        bundle_dir = resource_path("bin", "losslesscut")
+        if (bundle_dir / "LosslessCut.exe").exists():
+            return RuntimeSource(kind="bundle_dir", label="앱 번들", directory=bundle_dir)
+
+        project_dir = Path(__file__).resolve().parent.parent / "bin" / "losslesscut"
+        if (project_dir / "LosslessCut.exe").exists():
+            return RuntimeSource(kind="project_dir", label="프로젝트 bin 폴더", directory=project_dir)
+
+        bundle_path = resource_path("bin", "LosslessCut.exe")
+        if bundle_path.exists():
+            return RuntimeSource(kind="bundle", label="앱 번들", paths=(bundle_path,), directory=bundle_path.parent)
+
+        project_path = Path(__file__).resolve().parent.parent / "bin" / "LosslessCut.exe"
+        if project_path.exists():
+            return RuntimeSource(
+                kind="project",
+                label="프로젝트 bin 폴더",
+                paths=(project_path,),
+                directory=project_path.parent,
+            )
+
+        system_path = shutil.which("LosslessCut.exe") or shutil.which("LosslessCut")
+        if system_path:
+            system_dir = Path(system_path).parent
+            if (system_dir / "LosslessCut.exe").exists():
+                return RuntimeSource(kind="system", label="시스템 PATH", directory=system_dir)
+        return None
 
     def _resolve_ffmpeg_source(self) -> RuntimeSource | None:
         bundle_paths = (
@@ -339,11 +471,7 @@ class AppRuntimeInstaller:
         ffmpeg_path = shutil.which("ffmpeg.exe") or shutil.which("ffmpeg")
         ffprobe_path = shutil.which("ffprobe.exe") or shutil.which("ffprobe")
         if ffmpeg_path and ffprobe_path:
-            return RuntimeSource(
-                kind="system",
-                label="시스템 PATH",
-                paths=(Path(ffmpeg_path), Path(ffprobe_path)),
-            )
+            return RuntimeSource(kind="system", label="시스템 PATH", paths=(Path(ffmpeg_path), Path(ffprobe_path)))
         return None
 
     def _resolve_mkvmerge_source(self) -> RuntimeSource | None:
@@ -369,6 +497,25 @@ class AppRuntimeInstaller:
             if (system_dir / "mkvmerge.exe").exists():
                 return RuntimeSource(kind="system", label="시스템 PATH", directory=system_dir)
         return None
+
+    def _resolve_remote_losslesscut_spec(self) -> RemotePackageSpec:
+        payload = json.loads(self._download_text(LOSSLESSCUT_LATEST_RELEASE_API_URL))
+        assets = payload.get("assets", [])
+        asset = next((item for item in assets if item.get("name") == "LosslessCut-win-x64.7z"), None)
+        if asset is None or not asset.get("browser_download_url"):
+            raise RuntimeInstallError("최신 LosslessCut 릴리스에서 Windows 7z 자산을 찾지 못했습니다.")
+        version = str(payload.get("name") or payload.get("tag_name") or "latest").lstrip("v")
+        return RemotePackageSpec(
+            package_id="losslesscut",
+            label=self.PACKAGE_LABELS["losslesscut"],
+            version=version,
+            download_url=str(asset["browser_download_url"]),
+            checksum_url=None,
+            checksum_algorithm=None,
+            checksum_target_name=None,
+            archive_kind="7z",
+            source_label=self.REMOTE_SOURCE_LABELS["losslesscut"],
+        )
 
     def _resolve_remote_ffmpeg_spec(self) -> RemotePackageSpec:
         version_text = self._download_text("https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip.ver").strip()
@@ -405,7 +552,7 @@ class AppRuntimeInstaller:
 
     def _resolve_remote_mpc_be_spec(self) -> RemotePackageSpec:
         page = self._download_text(MPC_BE_RELEASES_URL)
-        versions = re.findall(r'/MPC-BE/Release%20builds/([0-9][0-9.]*)/', page)
+        versions = re.findall(r"/MPC-BE/Release%20builds/([0-9][0-9.]*)/", page)
         version = self._pick_latest_version(versions)
         archive_name = f"MPC-BE.{version}.x64.7z"
         checksum_name = f"mpc-be.{version}.checksums.sha"
@@ -427,10 +574,16 @@ class AppRuntimeInstaller:
             source_label=self.REMOTE_SOURCE_LABELS["mpc_be"],
         )
 
-    def _read_checksum(self, spec: RemotePackageSpec, *, log_callback: LogCallback = None) -> str:
+    def _read_checksum(self, spec: RemotePackageSpec, *, log_callback: LogCallback = None) -> str | None:
+        if spec.checksum_url is None:
+            return None
         self._emit_log(log_callback, "체크섬 정보를 확인합니다.")
         text = self._download_text(spec.checksum_url)
-        return self._parse_checksum_text(text, algorithm=spec.checksum_algorithm, target_name=spec.checksum_target_name)
+        return self._parse_checksum_text(
+            text,
+            algorithm=spec.checksum_algorithm or "",
+            target_name=spec.checksum_target_name,
+        )
 
     def _download_text(self, url: str) -> str:
         request = Request(url, headers={"User-Agent": USER_AGENT})
@@ -457,6 +610,7 @@ class AppRuntimeInstaller:
 
     @staticmethod
     def _parse_checksum_text(text: str, *, algorithm: str, target_name: str | None) -> str:
+        del algorithm
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         if target_name is None:
             if len(lines) != 1:

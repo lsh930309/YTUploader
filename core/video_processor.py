@@ -10,6 +10,7 @@ from pathlib import Path
 from queue import Empty, Queue
 from typing import Callable, Optional
 
+from .losslesscut import LosslessCutController
 from .models import ChapterMarker, ClipDraft
 from .paths import binary_path, create_job_temp_dir
 
@@ -183,14 +184,21 @@ def build_thumbnail_command(
 
 
 class VideoProcessor:
-    def __init__(self, ffmpeg_executable: Path | None = None, mkvmerge_executable: Path | None = None) -> None:
+    def __init__(
+        self,
+        ffmpeg_executable: Path | None = None,
+        mkvmerge_executable: Path | None = None,
+        losslesscut_controller: LosslessCutController | None = None,
+    ) -> None:
         self.ffmpeg_executable = ffmpeg_executable or binary_path("ffmpeg")
         self.mkvmerge_executable = mkvmerge_executable or binary_path("mkvmerge")
+        self.losslesscut_controller = losslesscut_controller or LosslessCutController()
         self._current_process: subprocess.Popen[str] | None = None
         self._cancel_requested = False
 
     def cancel(self) -> None:
         self._cancel_requested = True
+        self.losslesscut_controller.shutdown()
         if self._current_process and self._current_process.poll() is None:
             self._current_process.terminate()
 
@@ -256,11 +264,13 @@ class VideoProcessor:
             self._emit_stage(stage_callback, REMUXING)
             for clip in clips:
                 clip.output_mp4.parent.mkdir(parents=True, exist_ok=True)
-                self._emit_log(log_callback, f"클립 렌더링 중: {clip.clip_name} -> {clip.output_mp4.name}")
-                remux_command = build_remux_command(clip, temp_mkv, ffmpeg_executable=self.ffmpeg_executable)
-                self._run_command(remux_command, log_callback=log_callback)
-                self._ensure_not_cancelled()
-                rendered_paths.append(clip.output_mp4)
+                self._emit_log(log_callback, f"클립 export 준비: {clip.clip_name} -> {clip.output_mp4.name}")
+            rendered_paths = self.losslesscut_controller.export_clips(
+                source_path=temp_mkv,
+                clips=clips,
+                log_callback=log_callback,
+            )
+            self._ensure_not_cancelled()
 
             self._emit_stage(stage_callback, CLEANUP)
             shutil.rmtree(temp_dir, ignore_errors=True)

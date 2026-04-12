@@ -165,16 +165,16 @@ class MainWindow(QMainWindow):
         preview_row.addWidget(self.import_mpc_be_button)
         workflow_layout.addRow("미리보기", preview_row)
 
-        runtime_group = QGroupBox("내장 도구", tab)
+        runtime_group = QGroupBox("필수 도구", tab)
         runtime_layout = QFormLayout(runtime_group)
 
-        self.ffmpeg_runtime_status_value = QLabel("-", runtime_group)
-        self.install_ffmpeg_button = QPushButton("FFmpeg 설치하기", runtime_group)
-        ffmpeg_row = QHBoxLayout()
-        ffmpeg_row.addWidget(self.ffmpeg_runtime_status_value)
-        ffmpeg_row.addStretch(1)
-        ffmpeg_row.addWidget(self.install_ffmpeg_button)
-        runtime_layout.addRow("FFmpeg / FFprobe", ffmpeg_row)
+        self.losslesscut_runtime_status_value = QLabel("-", runtime_group)
+        self.install_losslesscut_button = QPushButton("LosslessCut 설치하기", runtime_group)
+        losslesscut_row = QHBoxLayout()
+        losslesscut_row.addWidget(self.losslesscut_runtime_status_value)
+        losslesscut_row.addStretch(1)
+        losslesscut_row.addWidget(self.install_losslesscut_button)
+        runtime_layout.addRow("LosslessCut", losslesscut_row)
 
         self.mkvmerge_runtime_status_value = QLabel("-", runtime_group)
         self.install_mkvmerge_button = QPushButton("MKVMerge 설치하기", runtime_group)
@@ -245,7 +245,7 @@ class MainWindow(QMainWindow):
         self.output_dir_browse_button.clicked.connect(self._choose_output_dir)
         self.preview_button.clicked.connect(self._launch_preview)
         self.import_mpc_be_button.clicked.connect(self._import_mpc_be_settings)
-        self.install_ffmpeg_button.clicked.connect(lambda: self._install_runtime_package("ffmpeg"))
+        self.install_losslesscut_button.clicked.connect(lambda: self._install_runtime_package("losslesscut"))
         self.install_mkvmerge_button.clicked.connect(lambda: self._install_runtime_package("mkvmerge"))
         self.install_mpc_be_runtime_button.clicked.connect(lambda: self._install_runtime_package("mpc_be"))
         self.refresh_runtime_status_button.clicked.connect(self._refresh_runtime_statuses)
@@ -496,6 +496,8 @@ class MainWindow(QMainWindow):
         self.output_dir_edit.setText(selected)
 
     def _launch_preview(self) -> None:
+        if not self._ensure_required_runtimes_ready():
+            return
         source_path = self._required_path(self.input_path_edit.text(), "입력 MKV 파일을 선택해 주세요.")
         try:
             selected_clip = self._selected_clip()
@@ -563,12 +565,12 @@ class MainWindow(QMainWindow):
     def _refresh_runtime_statuses(self) -> None:
         statuses = {status.package_id: status for status in self.runtime_installer.list_statuses()}
         self._apply_runtime_status(
-            status_text=statuses["ffmpeg"].status_text,
-            source_label=statuses["ffmpeg"].source_label,
-            status_label=self.ffmpeg_runtime_status_value,
-            button=self.install_ffmpeg_button,
-            default_button_text="FFmpeg 설치하기",
-            enable_button=statuses["ffmpeg"].installed or bool(statuses["ffmpeg"].source_label),
+            status_text=statuses["losslesscut"].status_text,
+            source_label=statuses["losslesscut"].source_label,
+            status_label=self.losslesscut_runtime_status_value,
+            button=self.install_losslesscut_button,
+            default_button_text="LosslessCut 설치하기",
+            enable_button=statuses["losslesscut"].installed or bool(statuses["losslesscut"].source_label),
         )
         self._apply_runtime_status(
             status_text=statuses["mkvmerge"].status_text,
@@ -756,6 +758,8 @@ class MainWindow(QMainWindow):
         self._start_worker(action=WorkerAction.AUTHENTICATE)
 
     def _process_only(self) -> None:
+        if not self._ensure_required_runtimes_ready():
+            return
         try:
             job_draft, output_dir = self._collect_job_and_output_dir()
         except (ValueError, TemplateRenderError) as exc:
@@ -765,6 +769,8 @@ class MainWindow(QMainWindow):
         self._start_worker(action=WorkerAction.PROCESS, job_draft=job_draft, output_dir=output_dir)
 
     def _upload_selected(self) -> None:
+        if not self._ensure_required_runtimes_ready():
+            return
         if not self._ensure_client_secrets_available():
             return
         if self._last_bundle is None:
@@ -773,6 +779,8 @@ class MainWindow(QMainWindow):
         self._start_worker(action=WorkerAction.UPLOAD, export_bundle=self._last_bundle)
 
     def _process_and_upload(self) -> None:
+        if not self._ensure_required_runtimes_ready():
+            return
         if not self._ensure_client_secrets_available():
             return
         try:
@@ -1022,7 +1030,7 @@ class MainWindow(QMainWindow):
             self.delay_spin,
             self.preview_button,
             self.import_mpc_be_button,
-            self.install_ffmpeg_button,
+            self.install_losslesscut_button,
             self.install_mkvmerge_button,
             self.install_mpc_be_runtime_button,
             self.refresh_runtime_status_button,
@@ -1061,6 +1069,16 @@ class MainWindow(QMainWindow):
         for control in controls:
             control.setEnabled(not busy)
         self.cancel_button.setEnabled(busy)
+
+    def _ensure_required_runtimes_ready(self) -> bool:
+        if self.runtime_installer.is_ready():
+            return True
+        missing_labels = [
+            self.runtime_installer.PACKAGE_LABELS[package_id]
+            for package_id in self.runtime_installer.missing_required_package_ids()
+        ]
+        self._show_error("필수 도구가 아직 준비되지 않았습니다: " + ", ".join(missing_labels))
+        return False
 
     def _ensure_client_secrets_available(self) -> bool:
         client_secrets_path = get_client_secrets_path()
